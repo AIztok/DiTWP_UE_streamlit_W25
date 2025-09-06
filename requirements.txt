@@ -1,4 +1,2 @@
-import math, sys, io, tempfile, os
-import streamlit as st
-import ifcopenshell
-from ifcopenshell.api import run
+streamlit
+ifcopenshell
