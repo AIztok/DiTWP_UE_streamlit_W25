@@ -17,31 +17,30 @@ with colA: Xd = st.slider("X", 0, 9, 9)
 with colB: Yd = st.slider("Y", 0, 9, 9)
 with colC: Zd = st.slider("Z", 0, 9, 9)
 
-student_tag = st.text_input("Eingabe Name der StudentIn + Enter", "Max Mustermann",)
+student_tag = st.text_input("Eingabe der kompletten Matrikelnummer + Enter", "123456789")
 
-# ── mapping digits → mm parameters (tweak ranges to taste) ─
-# Chosen so constraints (columns inside slab, etc.) always hold
+# ── mapping digits → mm parameters ─────────────────────────
 def digits_to_params(xd:int, yd:int, zd:int):
     # slab size
     X_mm = 4000.0 + xd * 600.0        # 4.0 m … 9.4 m
     Y_mm = 2500.0 + yd * 350.0        # 2.5 m … 5.65 m
-    Z_mm = 180.0  + zd * 30.0         # 180 mm … 450 mm (thickness & column/beam size base)
+    Z_mm = 180.0  + zd * 30.0         # 180 … 450 (also column/beam base)
 
     # columns (3) along X inside slab: at margin Z, mid, and (X - Z), centered in Y
-    col_side_mm   = Z_mm                              # square section b=h=Z
-    col_height_mm = max(2400.0, 10.0 * Z_mm)          # scalable, ≥ 2.4 m
+    col_side_mm   = Z_mm
+    col_height_mm = max(2400.0, 10.0 * Z_mm)
     x_positions   = [Z_mm, 0.5 * X_mm, X_mm - Z_mm]
     y_center      = 0.5 * Y_mm
 
-    # beam section equals column size
+    # beam section equals column size (depth 1.5× just for variety)
     beam_b_mm = Z_mm
-    beam_h_mm = Z_mm * 1.5                # depth = 1.5 * column size
+    beam_h_mm = Z_mm * 1.5
 
     return {
         "SLAB_LENGTH_MM": X_mm,
         "SLAB_WIDTH_MM":  Y_mm,
         "SLAB_THICK_MM":  Z_mm,
-        "Z_OFFSETS_MM":   [0.0],   # one slab at z=0 (easy to extend)
+        "Z_OFFSETS_MM":   [0.0],
         "COLUMNS": [
             {"name":"C1","x":x_positions[0],"y":y_center,"height":col_height_mm,"b":col_side_mm,"h":col_side_mm},
             {"name":"C2","x":x_positions[1],"y":y_center,"height":col_height_mm,"b":col_side_mm,"h":col_side_mm},
@@ -60,7 +59,7 @@ st.write(f"- Stützen x = {int(P['COLUMNS'][0]['x'])}, {int(P['COLUMNS'][1]['x']
          f"Höhe = {int(P['COLUMNS'][0]['height'])} mm")
 st.write(f"- Balken **{int(P['BEAM_B_MM'])} × {int(P['BEAM_H_MM'])}** mm")
 
-# ───────────────── IFC builder (from your working logic) ─────────────
+# ───────────────── IFC builder (geometry only) ───────────────────────
 def build_ifc_bytes(P, project_name):
     mm2m = 1.0 / 1000.0
     length_m = P["SLAB_LENGTH_MM"] * mm2m
@@ -85,15 +84,6 @@ def build_ifc_bytes(P, project_name):
     body_ctx = run("context.add_context", model,
                    context_type="Model", context_identifier="Body",
                    target_view="MODEL_VIEW", parent=model3d)
-
-    # material + (optional) grey style
-    mat = run("material.add_material", model, name="Concrete C30/37", category="concrete")
-    style = run("style.add_style", model, name="ConcreteGrey")
-    run("style.add_surface_style", model, style=style,
-        ifc_class="IfcSurfaceStyleShading",
-        attributes={"SurfaceColour": {"Name": None, "Red": 0.6, "Green": 0.6, "Blue": 0.6},
-                    "Transparency": 0.0})
-    run("style.assign_material_style", model, material=mat, style=style, context=body_ctx)
 
     # helpers
     def make_rect_profile(b_m: float, h_m: float, name: str):
@@ -136,7 +126,6 @@ def build_ifc_bytes(P, project_name):
         run("geometry.edit_object_placement", model, product=slab,
             matrix=((1,0,0,0),(0,1,0,0),(0,0,1,z_mm*mm2m),(0,0,0,1)))
         run("spatial.assign_container", model, relating_structure=storey, products=[slab])
-        run("material.assign_material", model, products=[slab], type="IfcMaterial", material=mat)
 
     # columns
     def col_top_xyz(col):
@@ -157,7 +146,6 @@ def build_ifc_bytes(P, project_name):
         run("geometry.edit_object_placement", model, product=column,
             matrix=((1,0,0,x_m),(0,1,0,y_m),(0,0,1,SUPPORT_TOP_M),(0,0,0,1)))
         run("spatial.assign_container", model, relating_structure=storey, products=[column])
-        run("material.assign_material", model, products=[column], type="IfcMaterial", material=mat)
 
     # beams (center-to-center, bottom flush with column tops)
     beam_b_m = P["BEAM_B_MM"] * mm2m
@@ -188,9 +176,8 @@ def build_ifc_bytes(P, project_name):
         run("geometry.edit_object_placement", model, product=beam,
             matrix=placement_matrix(origin, x_ax, y_ax, z_ax))
         run("spatial.assign_container", model, relating_structure=storey, products=[beam])
-        run("material.assign_material", model, products=[beam], type="IfcMaterial", material=mat)
 
-    # write to temp file and return bytes
+    # return IFC as bytes
     with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
         model.write(tmp.name)
         tmp.flush()
@@ -204,5 +191,5 @@ proj_name = f"DiTWP IFC [{Xd}{Yd}{Zd}]" + (f" - {student_tag}" if student_tag el
 
 if st.button("Erstellen IFC"):
     data = build_ifc_bytes(P, proj_name)
-    st.success("IFC model generated.")
-    st.download_button("⬇️ Download IFC", data=data, file_name=outfile, mime="application/octet-stream")
+    st.success("IFC erstellt.")
+    st.download_button("⬇️ IFC herunterladen", data=data, file_name=outfile, mime="application/octet-stream")
